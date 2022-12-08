@@ -1,0 +1,402 @@
+---
+title: "Air Quality Analysis in India"
+output: pdf_document
+---
+
+## Authors 
+  - Mahendra Gajula Pothamsetty, magj7729@colorado.edu
+  - Manasa Kolavennu, veko4270@colorado.edu
+  - Vishadh Vilas Sawant, visa4353@colorado.edu
+  - Santosh Adabala, siad4700@colorado.edu
+  - Pugazhventhan Kulandaivel, puku4269@colorado.edu
+
+
+## Introduction
+
+Environmental contamination has become a growing concern since industrialization. Air pollution is the biggest environmental concern in the world, according to a WHO analysis that links air pollution to 7 million early deaths each year. Furthermore, it has been discovered that India's air pollution is deadlier than even China's, as revealed in the NY Times article, India's Air Pollution Rivals China's as World's Deadliest.
+
+
+
+## Goal of the project: 
+
+Can we recognize regional trends? Can we link changes in environmental policy in India to changes in air quality?
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial Setup:
+
+Let's start with importing few handy libraries like tidyverse, ggplot2, tidyr, dplyr, stringr for data manipulation, data correction and visualizations
+
+```{r import_libraries}
+library(ggplot2)
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(corrplot)
+```
+
+
+
+## About the Dataset:
+
+Under the National Data Sharing and Accessibility Policy, the Ministry of Environment and Forests and the Central Pollution Control Board of India issued an unified and  Historical Daily Ambient Air Quality Data (NDSAP) dataset. This dataset contains the attributes causing pollution like SO2(Sulphur Dioxide), NO2 (Nitrogen Dioxide), rspm (Respirable Suspended Particulate Matter) and in addition we have information regarding the geo-logical location where the air sample is tested like state, location, location_monitoring_station along with the date on which data is collected. 
+
+This dataset allows for a more detailed examination of India's air pollution levels.
+
+Dataset is uploaded on GitHub, hence it must be read from github and a little glimpse of data is displayed.
+
+```{r read_data}
+url = 'https://raw.githubusercontent.com/mahendra-g-p/DataScience_as_a_Field_Project/main/Data/data.csv'
+
+
+pollution_data <- readr::read_csv(url)
+head(pollution_data)
+
+```
+
+## Data Cleaning:
+
+Firstly, total null values in the dataset need to be evaluated for each column.
+```{r count_null_values_1}
+colSums(is.na(pollution_data))
+```
+
+It is evident that data in columns like stn_code, agency, spm, pm2_5 are having null values more than the permissable levels ( Considered threshold level as 10% ). As the percentage of null values is very huge, it is better to remove those columns. Hence the above mentioned columns are removed.
+
+```{r data_cleaning_stage_1}
+pollution_data = subset(pollution_data, select = -c(stn_code, agency, spm, pm2_5))
+
+pollution_data
+```
+It is also observed that there are null values in columns like type & location_monitoring_station which are categorical attributes. As it is not correct to replace those null values with some random value, rows containing those null values are excluded.
+
+
+```{r data_cleaning_stage_2}
+
+pollution_data <- pollution_data[!(is.na(pollution_data$type) | pollution_data$type==""  | is.na(pollution_data$location_monitoring_station) | pollution_data$location_monitoring_station==""),]
+
+```
+
+Now, lets see how many null values exist in each column
+
+```{r count_null_values_2}
+colSums(is.na(pollution_data))
+```
+
+Finally, we are left with null values in numerical attributes i.e., so2, no2 & rspm
+
+
+
+Let's see the distribution of SO2 data 
+
+```{r distribution_plot_so2}
+
+qqnorm(pollution_data$so2, col = "skyblue3",
+       main = "SO2 Q-Q Plot")
+qqline(pollution_data$so2, col = "red", lwd = 3)
+
+```
+
+It seems the data in SO2 is right-skewed. Now let's find out the distributions of NO2 & RSPM data as well.
+
+```{r distribution_plot_no2_rspm}
+
+par(mfrow=c(2,2))
+
+qqnorm(pollution_data$no2, col = "skyblue3",
+       main = "NO2 Q-Q Plot")
+qqline(pollution_data$no2, col = "red", lwd = 3)
+
+
+qqnorm(pollution_data$rspm, col = "skyblue3",
+       main = "RSPM Q-Q Plot")
+qqline(pollution_data$rspm, col = "red", lwd = 3)
+
+```
+
+It seems to be the data in NO2 & RSPM columns are also right-skewed.
+
+
+First let's take so2 attribute for replacing the null values. As the data is skewed,  it is better to replace the null values with median instead of mean. 
+
+Now, the question is which mean we need to consider. Is it the mean of entire so2 column data? 
+
+It would be not right as there is data from multiple locations. So better to replace the null values of a location by the median of it's respective location.  
+
+For that, let's subset the entire data with just location and so2 columns then group the data by location and finally add a column with median of so2 values for that location.
+
+
+```{r replacing_so2_null_values_step1}
+
+subset_so2 <- pollution_data %>% select(location,so2) %>% group_by(location) %>% summarize(value = median(so2, na.rm = TRUE)) 
+sum(is.na(subset_so2$value))
+head(subset_so2)
+
+```
+
+
+Now the job is to find out null values under each location and replace it with the respective location's median.
+
+```{r replacing_so2_null_values_step2}
+
+sum(is.na(pollution_data$so2))
+p <- 0
+for (each in c(is.na(pollution_data$so2))) {
+  p <- p+1
+    if (each == TRUE) {
+      h <- subset_so2[match(pollution_data$location[p],subset_so2$location),'value']
+      pollution_data$so2[p] <- h[[1]]
+      }
+}
+sum(is.na(pollution_data$so2))
+
+```
+
+
+Almost 99% null values in so2 are removed. Now let's repeat the same replacing process for no2 as the data is not normally distributed. For that, again a subset of data containing unique locations and their respective median values of no2 are calculated.
+
+```{r replacing_no2_null_values_step1}
+
+subset_no2 <- pollution_data %>% select(location,no2) %>% group_by(location) %>% summarize(value = median(no2, na.rm = TRUE)) 
+sum(is.na(subset_no2$value))
+head(subset_no2)
+
+
+```
+
+Now, replace the null values in no2 under each location with it's respective location's median value.
+
+```{r replacing_no2_null_values_step2}
+
+
+sum(is.na(pollution_data$no2))
+p <- 0
+for (each in c(is.na(pollution_data$no2))) {
+  p <- p+1
+  if (each == TRUE) {
+    h <- subset_no2[match(pollution_data$location[p],subset_no2$location),'value']
+    pollution_data$no2[p] <- h[[1]]
+  }
+}
+sum(is.na(pollution_data$no2))
+
+
+```
+
+Almost all the null values are removed. Now only null values in rspm column are left. First, let's find out the median of rspm value for each and every unqiue locations.
+
+```{r replacing_rspm_null_values_step1}
+
+subset_rspm <- pollution_data %>% select(location,rspm) %>% group_by(location) %>% summarize(value = median(rspm, na.rm = TRUE)) 
+sum(is.na(subset_rspm$value))
+head(subset_rspm)
+
+```
+
+
+Now let's replace the null values under each location with it's respective median value.
+
+```{r replacing_rspm_null_values_step2}
+
+sum(is.na(pollution_data$rspm))
+p <- 0
+for (each in c(is.na(pollution_data$rspm))) {
+  p <- p+1
+  if (each == TRUE) {
+    h <- subset_rspm[match(pollution_data$location[p],subset_rspm$location),'value']
+    pollution_data$rspm[p] <- h[[1]]
+  }
+}
+sum(is.na(pollution_data$rspm))
+
+```
+
+After replacing all those null values, let's check if any null values exist 
+```{r count_null_values_3}
+
+colSums(is.na(pollution_data))
+
+```
+
+
+Surprisingly, a very small amount of null values are left over in so2 & no2 columns. Better to omit those rows containing null values.
+
+```{r cleaning_residual_nulls}
+
+pollution_data <- na.omit(pollution_data)
+
+```
+
+
+Now, let's have a final check on the null values count
+```{r count_null_values_4}
+
+colSums(is.na(pollution_data))
+
+```
+Finally, the data cleaning is done.
+
+
+## Data Manipulations:
+
+Before going for data visualizations, let's breakdown the date into year, month and date.
+```{r split_date}
+
+pollution_data = separate(pollution_data, date, into = c('Year','Month','Day'), sep = '-')
+pollution_data <- pollution_data %>% mutate_at(c('Year','Month','Day'), as.numeric)
+
+```
+
+Now find out the unique values in type column
+```{r finding_unique_types}
+
+unique(pollution_data$type)
+
+```
+
+Seems to be some types are pretty much similar by discription but are having various descriptions. So let's reduce the types. For example, replace "Industrial","Industrial Areas" with "Industrial Area"
+
+```{r reduce_types}
+pollution_data$type[pollution_data$type=="Sensitive Areas"] <-"Sensitive Area"
+pollution_data$type[pollution_data$type %in% c("Industrial","Industrial Areas")] <-"Industrial Area"
+pollution_data$type[pollution_data$type %in% c("Residential and others")] <-"Residential Area"
+pollution_data$type[pollution_data$type %in% c("Residential, Rural and other Areas")] <-"RIRUO"
+```
+
+
+## Let's explore some data visualizations
+
+Let's start with the NO2 pollutant. According to the National Ambient Air Quality Standards of India, NO2 limit must be 40. So let's check in how many locations in each state does the N02 pollutant value is greater than 40.
+
+```{r bar_plot_no2_levels_in_states}
+ggplot(pollution_data[pollution_data$no2>40,], aes(state))+
+  geom_bar(stat="count", width = 0.5, fill="darkblue")+
+  labs(x="State",
+       y="NO2 Score above 40", 
+       title="State vs NO2 level above 40 ")+ 
+  theme_bw()+
+  theme(plot.title = element_text(size=10),axis.text.x= element_text(size=15),
+        axis.text.y= element_text(size=10), axis.title=element_text(size=15)) +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+Surprisingly, West Bengal state tops the list which is followed by Maharashtra. And Delhi and Uttar Pradesh have considerably small count of locations with NO2 levels more than the permissable limit.
+
+
+Similarly, let's check for the SO2 pollutant. According to the National Ambient Air Quality Standards of India, SO2 limit must be 50. So let's check in how many locations in each state does the S02 pollutant value is greater than 50.
+
+```{r bar_plot_so2_levels_in_states}
+
+ggplot(pollution_data[pollution_data$so2>50,], aes(state))+
+  geom_bar(stat="count", width = 0.5, fill="#9933FF")+
+  labs(x="State",
+       y="SO2 Score above 50", 
+       title="State vs SO2 Level above 50 ")+ 
+  theme_bw()+
+  theme(plot.title = element_text(size=10),axis.text.x= element_text(size=15),
+        axis.text.y= element_text(size=10), axis.title=element_text(size=15)) +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+```
+
+Interesting to find out that, Maharashtra state is followed by West Bengal state in the list containing locations more than the permissable limit of 50
+
+
+Okay, now in that case, it is very anxious to find out the average sulphur dioxide content that is being emitted into the air in each state. Let's find out if Maharashtra or West Bengal tops the list again.
+
+
+```{r state_wise_avg_so2_plot}
+
+
+by_state_wise <-pollution_data%>%group_by(state)%>%summarise(Avg_So2=mean(so2,na.rm=TRUE), Avg_No2=mean(no2,na.rm=TRUE),Avg_Rspm=mean(rspm,na.rm=TRUE))
+
+
+ggplot(by_state_wise,aes(x=state,y=Avg_So2,color=Avg_So2)) +
+  geom_point(stat="identity") +
+  theme(axis.text.x =element_text(angle=90)) +
+  ggtitle("Average Sulphor Dioxide Content-State Wise") +
+  xlab(label="State") +
+  ylab(label="Average SO2 Content") +
+  labs(caption="")
+
+
+```
+
+Throwing away all the assumptions made before, Jharkand state emits the highest Average Sulphur Dioxide content into air. 
+
+
+Now let's have a look at Delhi state which is actually a Union Territory & the capital of India and also one of the top polluted city in India. Let's chcck how the particule matter more than 10 PPM (i.e., RSPM value here) has been varying from 2004 - 2014
+
+```{r avg_rspm_trends_delhi}
+
+Delhi <-pollution_data%>%filter(state=="Delhi")%>%group_by(Year,type)%>%summarise(Avg_So2=mean(so2,na.rm=TRUE),Avg_No2=mean(no2,na.rm=TRUE),Avg_Rspm=mean(rspm,na.rm=TRUE))
+ggplot(Delhi,aes(x=Year,y=Avg_Rspm)) +
+  geom_line(size=1,color="darkred") +
+  geom_point()+
+  facet_wrap(~type) +
+  ggtitle("Delhi RSPM Content-Year Wise")+
+  xlab("Year") +
+  ylab("Average RSPM")
+
+```
+
+It is clearly evident that the RSPM value increased a lot in both Industrial and Residential area over the period of 2004 - 2014 which contributed a lot for the pollution in Delhi.
+
+
+## Data Analysis
+
+- Respirable suspended particulate matter (RSPM), the deadliest pollutant in the city air.
+- Let's analyze which state is worst in case of RSPM
+
+```{r worst_rspm_state}
+state_rspm <- pollution_data %>% select(state,rspm) %>% group_by(state) %>% summarize(rspm_mean = mean(rspm, na.rm = TRUE))
+
+
+state_rspm[order(-state_rspm$rspm_mean),]
+```
+
+We found that Delhi has the worst average RSPM among the states
+
+Now let's check the same among the cities
+
+```{r worst_rspm_city}
+
+location_rspm <- pollution_data %>% select(location,rspm) %>% group_by(location) %>% summarize(rspm_mean = mean(rspm, na.rm = TRUE))
+
+
+location_rspm[order(-location_rspm$rspm_mean),]
+
+```
+Seems to be, Ghaziabad has the worst average RSPM value among all the cities.
+
+Now, it would be great to found which type of area is more polluted.
+
+```{r worst_rspm_type}
+
+type_rspm <- pollution_data %>% select(type,rspm) %>% group_by(type) %>% summarize(rspm_mean = mean(rspm, na.rm = TRUE))
+
+
+type_rspm[order(-type_rspm$rspm_mean),]
+
+```
+As expected, the Industrial area is the most polluted one.
+
+
+## Conclusion & Biases
+
+We can infer from the above data analysis that as more number of industries are located in the city of Ghaziabad which is part of Delhi state, it is one of the top polluted city because of presence of high amount of pollutants like RSPM. In addition, we can see West Singhbhum which is famous for Chromites deposits and iron ore mine. So we can observe more amount of RSPM in air along with highest average sulphur dioxide content (SO2) in air. And also the top 5 polluted cities observed in our analysis are more or less from the top 3 polluted states i.e., Delhi, Uttar Pradesh, Jharkhand. 
+
+Most of the industries in the above mentioned areas are the main reasons for pollutions and they seems to be least bothered about the air quality and are least concerned about the environmental policy. And even the residential area in Delhi contributes a lot to the pollution in Delhi state. So industrial and residential areas are the possible reasons for more pollution in Northern India. So these areas are dominating the lists with highest levels of pollutants in air. 
+
+All these factors/biases are playing a crucial role in polluting the air. These can be reduced by having a strict environmental policy and proper steps to relocate the industries from this area.
+
+
+
+```{r session_info}
+sessionInfo()
+```
+
+
